@@ -12,6 +12,7 @@ repository = "https://github.com/lifthrasiir/rust-encoding"
 keywords = ["encoding", "unicode", "charset"]
 readme = "README.md"
 license = "MIT"
+edition = "2021"
 
 [lib]
 name = "encoding_types"

@@ -6,12 +6,11 @@
 //! Single-byte index tables for
 //! [rust-encoding](https://github.com/lifthrasiir/rust-encoding).
 
-#![cfg_attr(feature = "nightly", feature(test))]
+#![cfg_attr(test, feature(test))]
 
 #[cfg(test)]
 #[macro_use]
 extern crate encoding_index_tests;
-
 
 /// ARMSCII-8
 pub mod armscii_8;
@@ -96,4 +95,3 @@ pub mod windows_1258;
 
 /// MacCyrillic.
 pub mod x_mac_cyrillic;
-

@@ -2,10 +2,15 @@
 name = "proto"
 version = "0.1.0"
 description = "IRC Protocol stuff"
+edition = "2021"
 
 
 [dependencies]
 encoding = { path = "../encoding"}
 tokio = {version = "1", features = ["full"] }
 bytes = "1.4"
-tokio-util = { version = "0.7", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+memchr = "2.5"
+thiserror = "1"
+pin-project = "1"
+futures-util = { version = "0.3", features = ["default", "sink" ] }
