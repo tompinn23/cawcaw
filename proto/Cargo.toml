@@ -1,0 +1,11 @@
+[package]
+name = "proto"
+version = "0.1.0"
+description = "IRC Protocol stuff"
+
+
+[dependencies]
+encoding = { path = "../encoding"}
+tokio = {version = "1", features = ["full"] }
+bytes = "1.4"
+tokio-util = { version = "0.7", features = ["full"] }
