@@ -17,3 +17,4 @@ tokio-util = { version = "0.7", features = ["full"] }
 futures-util = "0.3"
 pin-project = "1"
 proto = { path = "proto"}
+trust-dns-resolver = "*"

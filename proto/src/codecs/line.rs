@@ -4,7 +4,7 @@ use memchr::memchr;
 use tokio_util::codec::{Decoder, Encoder};
 
 use crate::error::LineCodecError;
-use std::{cmp, io};
+use std::{cmp, io, fmt};
 
 pub struct LineCodec {
     encoding: EncodingRef,
@@ -110,3 +110,13 @@ impl Encoder<String> for LineCodec {
         return data;
     }
 }
+
+impl fmt::Debug for LineCodec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LineCodec")
+            .field("encoder", &self.encoding.name())
+            .field("next_index", &self.next_index)
+            .field("max_length", &self.next_index)
+            .finish()
+    }
+} 

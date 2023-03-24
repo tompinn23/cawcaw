@@ -1,11 +1,9 @@
-use crate::codecs::{message, MessageCodec};
+use crate::codecs::{MessageCodec};
 use crate::command::Command;
 use crate::error::{self, ProtocolError};
 use crate::message::Message;
-use futures_util::future::ready;
 use futures_util::{future::Future, ready, sink::Sink, stream::Stream};
 use pin_project::pin_project;
-use std::io::Read;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -16,6 +14,7 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
+#[derive(Debug)]
 #[pin_project]
 struct Pinger {
     tx: UnboundedSender<Message>,
@@ -30,15 +29,17 @@ struct Pinger {
 impl Pinger {
     pub fn new(tx: UnboundedSender<Message>) -> Pinger {
         //FIXME: PING timeouts
-        let ping_time = Duration::from_secs(10);
-        let ping_timeout = Duration::from_secs(5);
-        Self {
+        let ping_time = Duration::from_secs(120);
+        let ping_timeout = Duration::from_secs(30);
+        let mut ret = Self {
             tx,
             enabled: true,
             ping_timeout,
             ping_deadline: None,
             ping_interval: time::interval(ping_time),
-        }
+        };
+        ret.ping_interval.reset();
+        ret
     }
 
     fn handle_message(self: Pin<&mut Self>, message: &Message) -> error::Result<()> {
@@ -68,7 +69,7 @@ impl Pinger {
         let mut this = self.project();
         this.tx
             .send(Command::Ping(data.clone(), None).into())
-            .map_err(|e| ProtocolError::SendError(e));
+            .map_err(|e| ProtocolError::SendError(e))?;
         if this.ping_deadline.is_none() {
             let ping_deadline = time::sleep(*this.ping_timeout);
             this.ping_deadline.set(Some(ping_deadline));
@@ -95,6 +96,7 @@ impl Future for Pinger {
     }
 }
 
+#[derive(Debug)]
 #[pin_project]
 pub struct Transport<T> {
     #[pin]

@@ -2,11 +2,11 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use crate::message::Message;
 use memchr::memmem;
-use std::str::FromStr;
 
 use super::LineCodec;
 use crate::error::{MessageParseError, ProtocolError};
 
+#[derive(Debug)]
 pub struct MessageCodec {
     inner: LineCodec,
 }
