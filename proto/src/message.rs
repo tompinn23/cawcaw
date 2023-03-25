@@ -21,6 +21,10 @@ impl Message {
         })
     }
 
+    pub fn set_prefix(&mut self, pf: &str) {
+        self.prefix = Some(Prefix::from(pf));
+    }
+
     pub fn to_string(&self) -> String {
         let mut ret = String::new();
         if let Some(ref prefix) = self.prefix {

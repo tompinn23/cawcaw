@@ -1,26 +1,29 @@
-
-use std::fs::read;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use std::task::Context;
 
-use futures_util::{StreamExt, Future, FutureExt};
+use crate::server::ServerState;
+use crate::tls_socket::Socket;
 use futures_util::future::FusedFuture;
-use futures_util::stream::{SplitStream, SplitSink, FusedStream};
-use proto::error::{self, ProtocolError, Result};
-use proto::message::Message;
-use tokio::sync::mpsc::{UnboundedSender, self, UnboundedReceiver};
-use tokio::io::{AsyncRead, AsyncWrite};
-use std::task::{Poll, ready};
-use std::pin::Pin;
-use tokio::net::TcpStream;
-use tokio_native_tls::TlsStream;
-use crate::connection::Connection;
+use futures_util::stream::{FusedStream, SplitSink, SplitStream};
 use futures_util::Sink;
 use futures_util::Stream;
+use futures_util::{Future, StreamExt};
+use proto::codecs::MessageCodec;
+use proto::error::{self, ProtocolError, Result};
+use proto::message::Message;
+use proto::prefix::Prefix;
+use proto::transport::Transport;
+use std::pin::Pin;
+use std::task::{ready, Poll};
+use tokio::net::TcpStream;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio_util::codec::Framed;
 
 #[derive(Debug)]
 pub struct ClientStream {
-    stream: SplitStream<Connection>,
-    outgoing: Option<Outgoing>
+    stream: SplitStream<Transport<Socket<TcpStream>>>,
+    outgoing: Option<Outgoing>,
 }
 
 impl ClientStream {
@@ -35,6 +38,7 @@ impl ClientStream {
 
         Ok(output)
     }
+
 }
 
 impl FusedStream for ClientStream {
@@ -72,10 +76,9 @@ impl Stream for ClientStream {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Sender {
-    tx: UnboundedSender<Message>
+    tx: UnboundedSender<Message>,
 }
 
 impl Sender {
@@ -88,9 +91,9 @@ impl Sender {
 
 #[derive(Debug)]
 pub struct Outgoing {
-    sink: SplitSink<Connection, Message>,
+    sink: SplitSink<Transport<Socket<TcpStream>>, Message>,
     stream: UnboundedReceiver<Message>,
-    buffered: Option<Message>
+    buffered: Option<Message>,
 }
 
 impl Outgoing {
@@ -141,18 +144,36 @@ impl Future for Outgoing {
     }
 }
 
+#[derive(Debug)]
+pub struct ClientState {
+    registered: bool,
+    nick: String,
+    realname: String,
+    hostname: String
+}
 
 #[derive(Debug)]
 pub struct Client {
-    incoming: Option<SplitStream<Connection>>,
+    incoming: Option<SplitStream<Transport<Socket<TcpStream>>>>,
     outgoing: Option<Outgoing>,
     sender: Sender,
+    addr: SocketAddr,
+    server: Arc<ServerState>
 }
 
 impl Client {
-    pub async fn new_tls(sock: TlsStream<TcpStream>) -> error::Result<Client> {
+    pub async fn new(ss: Arc<ServerState>, sock: Socket<TcpStream>) -> error::Result<Client> {
         let (tx_outgoing, rx_outgoing) = mpsc::unbounded_channel();
-        let conn = Connection::new_tls_connection(sock, tx_outgoing.clone());
+        let addr = match &sock {
+            Socket::Plain(s) => s.peer_addr(),
+            Socket::Tls(t) => t.get_ref().get_ref().get_ref().peer_addr(),
+        }.expect("Socket has no peer address");
+
+        let framed = Framed::new(
+            sock,
+            MessageCodec::new("utf-8").expect("Failed to create message codec"),
+        );
+        let conn = Transport::new(framed, tx_outgoing.clone());
         let (sink, incoming) = conn.split();
         let sender = Sender { tx: tx_outgoing };
 
@@ -161,17 +182,33 @@ impl Client {
             outgoing: Some(Outgoing {
                 sink,
                 stream: rx_outgoing,
-                buffered: None
+                buffered: None,
             }),
-            sender
+            sender,
+            addr,
+            server: ss
         })
     }
 
-    pub fn stream(& mut self) -> error::Result<ClientStream> {
+    pub async fn send_to<M: Into<Message>>(& mut self, msg: M) -> Result<(), ProtocolError> {
+        self.sender.send(msg)
+    }
+
+    pub async fn send<M: Into<Message>>(&mut self, msg: M) -> Result<(), ProtocolError> {
+        let mut msg: Message = msg.into();
+        msg.set_prefix(&self.server.get_name());
+        self.sender.send(msg)
+    }
+
+    pub fn address(&self) -> SocketAddr {
+        self.addr.clone()
+    }
+
+    pub fn stream(&mut self) -> error::Result<ClientStream> {
         let stream = self.incoming.take().expect("Stream already configured");
         Ok(ClientStream {
             stream,
-            outgoing: self.outgoing.take()
+            outgoing: self.outgoing.take(),
         })
     }
 
@@ -186,3 +223,5 @@ impl Client {
         self.sender.clone()
     }
 }
+
+pub enum MessageError {}

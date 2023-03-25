@@ -1,14 +1,37 @@
 use std::string;
 
-use crate::{error::MessageParseError, codecs::message};
+use crate::{codecs::message, error::MessageParseError};
 
+//use macros;
+
+//#[macros::stringlike]
 #[derive(Clone, PartialEq, Debug)]
 pub enum Command {
     /* Recipient, Message, cc's */
-    Privmsg(String, String, Option<Vec<String>>),
-    Notice(String, String),
-    Ping(String, Option<String>),
-    Pong(String, Option<String>),
+    PRIVMSG(String, String, Option<Vec<String>>),
+    NOTICE(String, String),
+    PING(String, Option<String>),
+    PONG(String, Option<String>),
+}
+
+#[allow(non_snake_case)]
+impl Command {
+    pub fn Privmsg<S: Into<String>>(nick: S, message: S, cc: Option<Vec<S>>) -> Command {
+        Command::Privmsg(
+            nick.into(),
+            message.into(),
+            cc.map(|o| o.into_iter().map(|s: S| s.into()).collect()),
+        )
+    }
+    pub fn Notice<S: Into<String>>(nick: S, message: S) -> Command {
+        Command::Notice(nick.into(), message.into())
+    }
+    pub fn Ping<S: Into<String>>(target: S, target2: Option<S>) -> Command {
+        Command::Ping(target.into(), target2.map(|s| s.into()))
+    }
+    pub fn Pong<S: Into<String>>(target: S, target2: Option<S>) -> Command {
+        Command::Pong(target.into(), target2.map(|s| s.into()))
+    }
 }
 
 impl Command {
@@ -32,15 +55,24 @@ impl Command {
                 _ => Err(MessageParseError::InvalidArgumentCount),
             },
             "PRIVMSG" => match args.len() {
-                2 => { if args[0].contains(",") {
+                2 => {
+                    if args[0].contains(",") {
                         let ccs: Vec<_> = args[0].split(",").collect();
-                        Ok(Command::Privmsg(ccs[0].to_owned(), args[1].to_owned(), Some(ccs[1..].iter().map(|s| s.to_string()).collect())))
-                    } else { 
-                        Ok(Command::Privmsg(args[0].to_owned(), args[1].to_owned(), None)) 
-                    } 
+                        Ok(Command::Privmsg(
+                            ccs[0].to_owned(),
+                            args[1].to_owned(),
+                            Some(ccs[1..].iter().map(|s| s.to_string()).collect()),
+                        ))
+                    } else {
+                        Ok(Command::Privmsg(
+                            args[0].to_owned(),
+                            args[1].to_owned(),
+                            None,
+                        ))
+                    }
                 }
-                _ => Err(MessageParseError::InvalidArgumentCount)
-            }
+                _ => Err(MessageParseError::InvalidArgumentCount),
+            },
             _ => Err(MessageParseError::InvalidCommand),
         }
     }
@@ -81,15 +113,18 @@ fn stringify_owned(cmd: &str, args: &[String]) -> String {
 impl<'a> From<&'a Command> for String {
     fn from(cmd: &'a Command) -> String {
         match *cmd {
-            Command::Privmsg(ref recip, ref message, Some(ref ccs)) => {
-                stringify("PRIVMSG", &[format!("{},{}", recip, ccs.join(",")).as_ref(), &message])
+            Command::PRIVMSG(ref recip, ref message, Some(ref ccs)) => stringify(
+                "privmsg",
+                &[format!("{},{}", recip, ccs.join(",")).as_ref(), &message],
+            ),
+            Command::PRIVMSG(ref recip, ref message, None) => {
+                stringify("PRIVMSG", &[&recip, &message])
             }
-            Command::Privmsg(ref recip, ref message, None) => stringify("PRIVMSG", &[&recip, &message]),
-            Command::Notice(ref nick, ref msg) => stringify("NOTICE", &[&nick, &msg]),
-            Command::Ping(ref sv1, Some(ref sv2)) => stringify("PING", &[&sv1, &sv2]),
-            Command::Ping(ref sv1, None) => stringify("PING", &[&sv1]),
-            Command::Pong(ref daemon, Some(ref daemon2)) => stringify("PING", &[&daemon, &daemon2]),
-            Command::Pong(ref sv1, None) => stringify("PONG", &[&sv1]),
+            Command::NOTICE(ref nick, ref msg) => stringify("NOTICE", &[&nick, &msg]),
+            Command::PING(ref sv1, Some(ref sv2)) => stringify("PING", &[&sv1, &sv2]),
+            Command::PING(ref sv1, None) => stringify("PING", &[&sv1]),
+            Command::PONG(ref daemon, Some(ref daemon2)) => stringify("PING", &[&daemon, &daemon2]),
+            Command::PONG(ref sv1, None) => stringify("PONG", &[&sv1]),
         }
     }
 }

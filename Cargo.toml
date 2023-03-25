@@ -6,8 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace]
-members = ["./", "proto"] 
-
+members = ["./", "proto"]
 
 [dependencies]
 tokio = {version = "1", features = ["full"] }
@@ -18,3 +17,8 @@ futures-util = "0.3"
 pin-project = "1"
 proto = { path = "proto"}
 trust-dns-resolver = "*"
+async-trait = "0.1.67"
+thiserror = "1"
+figment = { version = "0.10", features= ["toml","env"]}
+serde = {version="1", features=["derive"]}
+toml = "0.5"

@@ -1,4 +1,4 @@
-use crate::codecs::{MessageCodec};
+use crate::codecs::MessageCodec;
 use crate::command::Command;
 use crate::error::{self, ProtocolError};
 use crate::message::Message;
@@ -44,10 +44,10 @@ impl Pinger {
 
     fn handle_message(self: Pin<&mut Self>, message: &Message) -> error::Result<()> {
         match message.command {
-            Command::Ping(ref data, _) => {
+            Command::PING(ref data, _) => {
                 self.send_pong(data)?;
             }
-            Command::Pong(_, None) | Command::Pong(_, Some(_)) => {
+            Command::PONG(_, None) | Command::PONG(_, Some(_)) => {
                 self.project().ping_deadline.set(None);
             }
             _ => (),

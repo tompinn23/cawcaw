@@ -72,6 +72,12 @@ impl fmt::Display for Prefix {
     }
 }
 
+impl Into<Prefix> for String {
+    fn into(self) -> Prefix {
+        Prefix::new_from_str(&self)
+    }
+}
+
 impl FromStr for Prefix {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
