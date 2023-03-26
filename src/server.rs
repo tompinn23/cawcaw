@@ -12,6 +12,7 @@ use tokio::{net::TcpListener, net::TcpStream};
 use tokio_native_tls::native_tls;
 use tokio_native_tls::TlsAcceptor;
 use trust_dns_resolver::TokioAsyncResolver;
+use tokio::sync::RwLock;
 
 use proto::command::Command;
 use proto::error::{ProtocolError, MessageParseError};
@@ -106,7 +107,7 @@ enum ServerPhase {
 #[derive(Debug, Clone)]
 pub struct ServerState {
     hostname: String,
-    clients: HashMap<String, ClientState>,
+    clients: Arc<RwLock<HashMap<String, Arc<RwLock<Client>>>>>,
 }
 
 impl ServerState {
@@ -114,7 +115,7 @@ impl ServerState {
     pub fn new(hostname: String) -> Self {
         Self {
             hostname,
-            clients: HashMap::new(),
+            clients: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -122,16 +123,28 @@ impl ServerState {
         &self.hostname
     }
 
-    pub async fn send<M: Into<Message>>(&mut self, client: &Client, msg: M) -> Result<(), ProtocolError> {
+    pub async fn send<M: Into<Message>>(&self, client: &Client, msg: M) -> Result<(), ProtocolError> {
         let mut msg: Message = msg.into();
         msg.set_prefix(&self.get_name());
         client.sender().send(msg)
+    }
+
+    pub async fn check_nick(&self, nick: &str) -> bool {
+        self.clients.read().await.contains_key(nick)
+    }
+
+    pub async fn register_client(&mut self, mut client: Client, password: Option<String>, nick: &String, user: &String, real: &String) -> Result<Arc<RwLock<Client>>, Response> {
+        let mut clients = self.clients.write().await;
+        client.register(&nick, &user, &real);
+        let client = Arc::new(RwLock::new(client));
+        clients.insert(nick.to_string(), client.clone());
+        Ok(client)
     }
 }
 
 #[derive(Debug)]
 pub struct Server {
-    state: Arc<ServerState>,
+    state: Arc<RwLock<ServerState>>,
     resolver: TokioAsyncResolver,
     listeners: Vec<Listener>,
     phase: ServerPhase,
@@ -144,7 +157,7 @@ impl Server {
         Ok(Self {
             resolver,
             listeners: Vec::new(),
-            state: Arc::new(ServerState::new(hostname)),
+            state: Arc::new(RwLock::new(ServerState::new(hostname))),
             phase: ServerPhase::Startup,
         })
     }
@@ -177,26 +190,34 @@ impl Server {
         Ok(())
     }
 
+    pub fn set_phase(&mut self, phase: ServerPhase) {
+        self.phase = phase;
+    }
+
+    pub async fn wait_for_client(&mut self) -> Result<Socket<TcpStream>, ServerError> {
+        let mut iter: FuturesUnordered<_> = self.listeners.iter().map(|l| l.accept()).collect();
+        let conn = loop {
+            if let Some(c) = iter.next().await {
+                match c {
+                    Ok(val) => break val,
+                    Err(e) => eprintln!("{}", e),
+                }
+            }
+        };
+        Ok(conn)
+    }
+
     pub async fn run(&mut self) -> Result<(), ServerError> {
         self.phase = ServerPhase::Running;
         loop {
-            let mut iter: FuturesUnordered<_> = self.listeners.iter().map(|l| l.accept()).collect();
-            let conn = loop {
-                if let Some(c) = iter.next().await {
-                    match c {
-                        Ok(val) => break val,
-                        Err(e) => eprintln!("{}", e),
-                    }
-                }
-            };
+            let conn = self.wait_for_client().await.expect("Error accepting client");
             let resolver = self.resolver.clone();
-            let ss = self.state.clone();
+            let server = self.state.clone();
             tokio::spawn(async move {
                 let mut client = Client::new(conn)
                     .await
                     .expect("Client construction failed");
-                ss
-                    .send(&client, Command::Notice(
+                server.read().await.send(&client, Command::Notice(
                         "*",
                         "*** Attempting lookup of your hostname...",
                     ))
@@ -208,8 +229,7 @@ impl Server {
                             .iter()
                             .nth(0)
                             .expect("Failed to get hostname even though i did");
-                        client
-                            .send(Command::Notice(
+                        server.read().await.send(&client, Command::Notice(
                                 "*".to_owned(),
                                 format!("*** Found hostname using {}", hostname.to_string()),
                             ))
@@ -217,15 +237,15 @@ impl Server {
                             .expect("Failed to send message");
                     }
                     Err(e) => {
-                        client.send(Command::Notice("*".to_owned(), format!("*** Lookup of hostname failed: {} using your ip address ({}) instead", e, client.address().ip()))).await.expect("Failed to send message");
+                        server.read().await.send(&client, Command::Notice("*".to_owned(), format!("*** Lookup of hostname failed: {} using your ip address ({}) instead", e, client.address().ip()))).await.expect("Failed to send message");
                     }
                 }
                 client.poll_send().await.expect("Failed to send message");
                 println!("Entering registration loop");
                 let mut stream = client.stream().expect("Failed to obtain client stream.");
-                let mut password = String::new();
+                let mut password: Option<String> = None;
                 let mut nick = String::new();
-                let result: Result<(), ProtocolError> = loop {
+                let result: Result<Arc<RwLock<Client>>, ProtocolError> = loop {
                     if let Some(message) = stream.next().await {
                         match message {
                             Ok(message) => {
@@ -233,17 +253,23 @@ impl Server {
                                 match &message.contents {
                                     MessageContents::Command(command) => match command {
                                         Command::PASS(pass) => {
-                                            password = pass.to_owned();
+                                            password = Some(pass.to_owned());
                                         }
                                         Command::NICK(nickname, _) => {
+                                            if server.read().await.check_nick(nickname).await {
+                                                break_err!(server.read().await.send(&client, Response::ErrNickCollision(nickname.clone())).await);
+                                            }
                                             nick = nickname.to_owned();
                                         }
-                                        Command::USER(user, host, server, real) => {
-                                            client.register()
+                                        Command::USER(user, _, _, real) => {
+                                            match server.write().await.register_client(client, password, &nick, user, real).await {
+                                                Ok(v) => break Ok(v),
+                                                Err(e) => break Err(ProtocolError::ServerError)
+                                            };
                                         }
                                         Command::PONG(_, _) | Command::PING(_, _) => {}
                                         _ => {
-                                            break_err!(client.send(Response::ErrNotRegistered).await);
+                                            break_err!(server.read().await.send(&client, Response::ErrNotRegistered).await);
                                         }
                                     },
                                     _ => (),
@@ -252,19 +278,20 @@ impl Server {
                             Err(e) => match e {
                                 ProtocolError::InvalidMessage { string, cause } => match cause {
                                     MessageParseError::ErrResponse(r) => {
-                                        break_err!(client.send(r).await);
+                                        break_err!(server.read().await.send(&client, r).await);
                                     }
                                     _ => break Err(ProtocolError::InvalidMessage { string, cause })
                                 }
                                 _ => break Err(e)
                             }
-                        }                        
+                        }
                     }
                 };
                 if result.is_err() {
                     eprintln!("Error: {}", result.unwrap_err());
                     return;
                 }
+                let client = result.unwrap();
             });
         }
         //Ok(())

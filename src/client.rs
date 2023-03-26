@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::task::Context;
 
-use crate::server::ServerState;
 use crate::tls_socket::Socket;
 use futures_util::future::FusedFuture;
 use futures_util::stream::{FusedStream, SplitSink, SplitStream};
@@ -12,13 +11,13 @@ use futures_util::{Future, StreamExt};
 use proto::codecs::MessageCodec;
 use proto::error::{self, ProtocolError, Result};
 use proto::message::Message;
-use proto::prefix::Prefix;
 use proto::transport::Transport;
 use std::pin::Pin;
 use std::task::{ready, Poll};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio_util::codec::Framed;
+use tokio::sync::RwLock;
 
 #[derive(Debug)]
 pub struct ClientStream {
@@ -148,8 +147,30 @@ impl Future for Outgoing {
 pub struct ClientState {
     registered: bool,
     nick: String,
+    user: String
     realname: String,
     hostname: String
+}
+
+impl ClientState {
+    fn new() -> Self {
+        Self {
+            registered: false,
+            nick: String::new(),
+            user: String::new(),
+            realname:String::new(),
+            hostname: String::new()
+        }
+    }
+    fn register(&mut self, nick: &String, user: &String, realname: &String) {
+        self.nick = nick.to_owned();
+        self.user = user.to_owned();
+        self.realname = realname.to_owned();
+        self.registered = true;
+    }
+    fn set_hostname(&mut self, hostname: String) {
+        self.hostname = hostname;
+    }
 }
 
 #[derive(Debug)]
@@ -158,6 +179,7 @@ pub struct Client {
     outgoing: Option<Outgoing>,
     sender: Sender,
     addr: SocketAddr,
+    state: Arc<ClientState>
 }
 
 impl Client {
@@ -192,7 +214,17 @@ impl Client {
         self.sender.send(msg)
     }
 
+    pub fn set_hostame(&mut self, hostname: String) {
+        self.state.set_hostname(hostname);
+    }
 
+    pub fn register(&mut self, nick: &String, user: &String, real: &String) {
+        self.state.register(nick, user, real);
+    }
+
+    pub fn state(&self) -> Arc<ClientState> {
+        self.state.clone()
+    }
 
     pub fn address(&self) -> SocketAddr {
         self.addr.clone()

@@ -13,6 +13,8 @@ pub enum ProtocolError {
     Io(#[source] std::io::Error),
     #[error("ping timeout reached")]
     PingTimeout,
+    #[error("server error")]
+    ServerError,
     #[error("invalid message: {}", string)]
     InvalidMessage {
         string: String,
