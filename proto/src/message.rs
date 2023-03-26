@@ -8,20 +8,20 @@ use std::{fmt::Write, str::FromStr};
 #[derive(Clone, PartialEq, Debug)]
 pub enum MessageContents {
     Command(command::Command),
-    Response(response::Response)
+    Response(response::Response),
 }
 
 impl MessageContents {
     pub fn to_string(&self) -> String {
         match self {
-            MessageContents::Command(command) => { 
+            MessageContents::Command(command) => {
                 let mut ret = String::new();
                 let cmd: String = From::from(command);
                 //TODO: Move to config or somthing i don't know.
                 ret.push_str(&cmd);
                 ret.push_str("\r\n");
                 ret
-            },
+            }
             MessageContents::Response(response) => {
                 let mut ret = String::new();
                 let cmd: String = From::from(response);
@@ -37,7 +37,7 @@ impl MessageContents {
 #[derive(Clone, PartialEq, Debug)]
 pub struct Message {
     pub prefix: Option<Prefix>,
-    pub contents: MessageContents
+    pub contents: MessageContents,
 }
 
 impl Message {
@@ -64,11 +64,8 @@ impl Message {
         ret.push_str(&self.contents.to_string());
         ret.push_str("\r\n");
         ret
-            
     }
 }
-
-
 
 impl From<command::Command> for Message {
     fn from(value: command::Command) -> Self {
