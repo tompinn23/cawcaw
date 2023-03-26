@@ -12,25 +12,30 @@ pub enum Command {
     NOTICE(String, String),
     PING(String, Option<String>),
     PONG(String, Option<String>),
+    RAW(String)
 }
 
 #[allow(non_snake_case)]
 impl Command {
     pub fn Privmsg<S: Into<String>>(nick: S, message: S, cc: Option<Vec<S>>) -> Command {
-        Command::Privmsg(
+        Command::PRIVMSG(
             nick.into(),
             message.into(),
             cc.map(|o| o.into_iter().map(|s: S| s.into()).collect()),
         )
     }
     pub fn Notice<S: Into<String>>(nick: S, message: S) -> Command {
-        Command::Notice(nick.into(), message.into())
+        Command::NOTICE(nick.into(), message.into())
     }
     pub fn Ping<S: Into<String>>(target: S, target2: Option<S>) -> Command {
-        Command::Ping(target.into(), target2.map(|s| s.into()))
+        Command::PING(target.into(), target2.map(|s| s.into()))
     }
     pub fn Pong<S: Into<String>>(target: S, target2: Option<S>) -> Command {
-        Command::Pong(target.into(), target2.map(|s| s.into()))
+        Command::PONG(target.into(), target2.map(|s| s.into()))
+    }
+
+    pub fn Raw<S: Into<String>>(raw: S) -> Command {
+        Command::RAW(raw.into())
     }
 }
 
@@ -125,6 +130,7 @@ impl<'a> From<&'a Command> for String {
             Command::PING(ref sv1, None) => stringify("PING", &[&sv1]),
             Command::PONG(ref daemon, Some(ref daemon2)) => stringify("PING", &[&daemon, &daemon2]),
             Command::PONG(ref sv1, None) => stringify("PONG", &[&sv1]),
+            Command::RAW(ref raw) => stringify(raw, &[]),
         }
     }
 }

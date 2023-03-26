@@ -1,7 +1,7 @@
 use crate::codecs::MessageCodec;
 use crate::command::Command;
 use crate::error::{self, ProtocolError};
-use crate::message::Message;
+use crate::message::{MessageContents, Message};
 use futures_util::{future::Future, ready, sink::Sink, stream::Stream};
 use pin_project::pin_project;
 use std::pin::Pin;
@@ -43,13 +43,18 @@ impl Pinger {
     }
 
     fn handle_message(self: Pin<&mut Self>, message: &Message) -> error::Result<()> {
-        match message.command {
-            Command::PING(ref data, _) => {
-                self.send_pong(data)?;
-            }
-            Command::PONG(_, None) | Command::PONG(_, Some(_)) => {
-                self.project().ping_deadline.set(None);
-            }
+        match &message.contents {
+            MessageContents::Command(command) => {
+                match command {
+                    Command::PING(ref data, _) => {
+                        self.send_pong(data)?;
+                    }
+                    Command::PONG(_, None) | Command::PONG(_, Some(_)) => {
+                        self.project().ping_deadline.set(None);
+                    }
+                    _ => (),
+                }
+            },
             _ => (),
         }
         Ok(())

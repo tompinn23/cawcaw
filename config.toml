@@ -8,5 +8,4 @@ address = "127.0.0.1:6667"
 [[server.listeners]]
 name = "tls"
 address = "127.0.0.1:6697"
-tls.cert = "cert.pem"
-tls.key = "key.pem"
+tls = { cert = "cert.pem", key = "key.pem" }

@@ -212,7 +212,7 @@ impl Client {
         })
     }
 
-    pub async fn pump_send(&mut self) -> Result<(), ProtocolError> {
+    pub async fn poll_send(&mut self) -> Result<(), ProtocolError> {
         if let Some(outgoing) = self.outgoing.as_mut() {
             outgoing.await?;
         }

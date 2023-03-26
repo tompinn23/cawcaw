@@ -1,12 +1,43 @@
-use super::command::Command;
+use super::command;
+use super::response;
 use crate::error::{MessageParseError, ProtocolError};
 use crate::prefix::Prefix;
 use std::{fmt::Write, str::FromStr};
 
+#[non_exhaustive]
+#[derive(Clone, PartialEq, Debug)]
+pub enum MessageContents {
+    Command(command::Command),
+    Response(response::Response)
+}
+
+impl MessageContents {
+    pub fn to_string(&self) -> String {
+        match self {
+            MessageContents::Command(command) => { 
+                let mut ret = String::new();
+                let cmd: String = From::from(command);
+                //TODO: Move to config or somthing i don't know.
+                ret.push_str(&cmd);
+                ret.push_str("\r\n");
+                ret
+            },
+            MessageContents::Response(response) => {
+                let mut ret = String::new();
+                let cmd: String = From::from(response);
+                //TODO: Move to config or somthing i don't know.
+                ret.push_str(&cmd);
+                ret.push_str("\r\n");
+                ret
+            }
+            _ => "".to_owned(),
+        }
+    }
+}
 #[derive(Clone, PartialEq, Debug)]
 pub struct Message {
     pub prefix: Option<Prefix>,
-    pub command: Command,
+    pub contents: MessageContents
 }
 
 impl Message {
@@ -17,7 +48,7 @@ impl Message {
     ) -> Result<Message, MessageParseError> {
         Ok(Message {
             prefix: prefix.map(|p| p.into()),
-            command: Command::new(command, args)?,
+            contents: MessageContents::Command(command::Command::new(command, args)?),
         })
     }
 
@@ -30,19 +61,29 @@ impl Message {
         if let Some(ref prefix) = self.prefix {
             write!(ret, ":{} ", prefix).unwrap();
         }
-        let cmd: String = From::from(&self.command);
-        //TODO: Move to config or something i don't know.
-        ret.push_str(&cmd);
+        ret.push_str(&self.contents.to_string());
         ret.push_str("\r\n");
         ret
+            
     }
 }
 
-impl From<Command> for Message {
-    fn from(value: Command) -> Self {
+
+
+impl From<command::Command> for Message {
+    fn from(value: command::Command) -> Self {
         Message {
             prefix: None,
-            command: value,
+            contents: MessageContents::Command(value),
+        }
+    }
+}
+
+impl From<response::Response> for Message {
+    fn from(value: response::Response) -> Self {
+        Message {
+            prefix: None,
+            contents: MessageContents::Response(value),
         }
     }
 }

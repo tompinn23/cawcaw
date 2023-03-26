@@ -1,6 +1,7 @@
 use crate::{tls_socket::Socket, Client};
 use futures_util::stream::FuturesUnordered;
 use futures_util::{StreamExt, TryFutureExt};
+use proto::message::{Message, MessageContents};
 use trust_dns_resolver::TokioAsyncResolver;
 use std::io;
 use std::sync::Arc;
@@ -11,6 +12,20 @@ use tokio_native_tls::TlsAcceptor;
 use tokio_native_tls::native_tls;
 
 use proto::command::Command;
+use proto::response::Response;
+use proto::error::ProtocolError;
+
+
+macro_rules! break_err {
+    ($res:expr) => {
+        match $res {
+            Ok(val) => val,
+            Err(e) => {
+                break Err(e);
+            }
+        }
+    };
+}
 
 #[derive(Debug)]
 pub enum Listener {
@@ -146,7 +161,7 @@ impl Server {
         Ok(())
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(&mut self) -> Result<(), ServerError> {
         self.phase = ServerPhase::Running;
         loop {
             let mut iter: FuturesUnordered<_> = self.listeners.iter().map(|l| l.accept()).collect();
@@ -164,13 +179,35 @@ impl Server {
                 let mut client = Client::new(ss, conn).await.expect("Client construction failed");
                 client.send(Command::Notice("*", "*** Attempting lookup of your hostname...")).await.expect("Failed to send message");
                 match resolver.reverse_lookup(client.address().ip()).await {
-                    Ok(val) => {}
+                    Ok(val) => {
+                        let hostname = val.iter().nth(0).expect("Failed to get hostname even though i did");
+                        client.send(Command::Notice("*".to_owned(), format!("*** Found hostname using {}", hostname.to_string()))).await.expect("Failed to send message");
+                    }
                     Err(e) => {
                         client.send(Command::Notice("*".to_owned(), format!("*** Lookup of hostname failed: {} using your ip address ({}) instead", e, client.address().ip()))).await.expect("Failed to send message");
                     }
                 }
+                client.poll_send().await;
+                let mut stream = client.stream().expect("Failed to obtain client stream.");
+                let result: Result<(), ProtocolError> = loop {
+                    if let Some(message) = stream.next().await {
+                        if message.is_err() {
+                            break Err(message.unwrap_err());
+                        }
+                        let message = message.unwrap();
+                        match &message.contents {
+                            MessageContents::Command(command) => match command {
+                                _ => {
+                                    break_err!(client.send(Response::ErrNotRegistered).await);
+                                }
+                            }
+                            _ => ()
+                        }
+                    }
+                };
             });
         }
+        //Ok(())
     }
 }
 
