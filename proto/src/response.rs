@@ -1,13 +1,20 @@
+use std::fmt::format;
 
+
+#[repr(u32)]
 #[derive(Clone, PartialEq, Debug)]
 pub enum Response {
-    ErrNotRegistered = 451
+    ErrNoSuchCommand(String) = 421,
+    ErrNotRegistered = 451,
+    ErrNeedMoreParams(String) = 461 
 }
 
 impl Response {
     pub fn to_string(&self) -> String {
         match self {
-            Response::ErrNotRegistered => "451 :You have not registered".to_string()
+            Response::ErrNoSuchCommand(cmd) => format!("421 {} :Unknown command", cmd),
+            Response::ErrNotRegistered => "451 :You have not registered".to_string(),
+            Response::ErrNeedMoreParams(cmd) => format!("462 {} :Not enough parameters", cmd),
         }
     }
 }

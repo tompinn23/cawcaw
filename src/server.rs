@@ -1,3 +1,5 @@
+use crate::client::ClientState;
+use crate::config::Config;
 use crate::{tls_socket::Socket, Client};
 use futures_util::stream::FuturesUnordered;
 use futures_util::{StreamExt, TryFutureExt};
@@ -12,7 +14,7 @@ use tokio_native_tls::TlsAcceptor;
 use trust_dns_resolver::TokioAsyncResolver;
 
 use proto::command::Command;
-use proto::error::ProtocolError;
+use proto::error::{ProtocolError, MessageParseError};
 use proto::response::Response;
 
 macro_rules! break_err {
@@ -104,17 +106,31 @@ enum ServerPhase {
 #[derive(Debug, Clone)]
 pub struct ServerState {
     hostname: String,
+    clients: HashMap<String, ClientState>,
 }
 
 impl ServerState {
+
+    pub fn new(hostname: String) -> Self {
+        Self {
+            hostname,
+            clients: HashMap::new(),
+        }
+    }
+
     pub fn get_name(&self) -> &str {
         &self.hostname
+    }
+
+    pub async fn send<M: Into<Message>>(&mut self, client: &Client, msg: M) -> Result<(), ProtocolError> {
+        let mut msg: Message = msg.into();
+        msg.set_prefix(&self.get_name());
+        client.sender().send(msg)
     }
 }
 
 #[derive(Debug)]
 pub struct Server {
-    clients: HashMap<String, Client>,
     state: Arc<ServerState>,
     resolver: TokioAsyncResolver,
     listeners: Vec<Listener>,
@@ -126,10 +142,9 @@ impl Server {
         let resolver =
             TokioAsyncResolver::tokio_from_system_conf().expect("Failed to create DNS resolver");
         Ok(Self {
-            clients: HashMap::new(),
             resolver,
             listeners: Vec::new(),
-            state: Arc::new(ServerState { hostname }),
+            state: Arc::new(ServerState::new(hostname)),
             phase: ServerPhase::Startup,
         })
     }
@@ -177,11 +192,11 @@ impl Server {
             let resolver = self.resolver.clone();
             let ss = self.state.clone();
             tokio::spawn(async move {
-                let mut client = Client::new(ss, conn)
+                let mut client = Client::new(conn)
                     .await
                     .expect("Client construction failed");
-                client
-                    .send(Command::Notice(
+                ss
+                    .send(&client, Command::Notice(
                         "*",
                         "*** Attempting lookup of your hostname...",
                     ))
@@ -208,23 +223,42 @@ impl Server {
                 client.poll_send().await.expect("Failed to send message");
                 println!("Entering registration loop");
                 let mut stream = client.stream().expect("Failed to obtain client stream.");
+                let mut password = String::new();
+                let mut nick = String::new();
                 let result: Result<(), ProtocolError> = loop {
                     if let Some(message) = stream.next().await {
-                        if message.is_err() {
-                            break Err(message.unwrap_err());
-                        }
-                        let message = message.unwrap();
-                        println!("Message: {:?}", message);
-                        match &message.contents {
-                            MessageContents::Command(command) => match command {
-                                _ => {
-                                    break_err!(client.send(Response::ErrNotRegistered).await);
+                        match message {
+                            Ok(message) => {
+                                println!("Message: {:?}", message);
+                                match &message.contents {
+                                    MessageContents::Command(command) => match command {
+                                        Command::PASS(pass) => {
+                                            password = pass.to_owned();
+                                        }
+                                        Command::NICK(nickname, _) => {
+                                            nick = nickname.to_owned();
+                                        }
+                                        Command::USER(user, host, server, real) => {
+                                            client.register()
+                                        }
+                                        Command::PONG(_, _) | Command::PING(_, _) => {}
+                                        _ => {
+                                            break_err!(client.send(Response::ErrNotRegistered).await);
+                                        }
+                                    },
+                                    _ => (),
                                 }
-                            },
-                            _ => (),
-                        }
-                    } else {
-                        break Err(ProtocolError::PingTimeout);
+                            }
+                            Err(e) => match e {
+                                ProtocolError::InvalidMessage { string, cause } => match cause {
+                                    MessageParseError::ErrResponse(r) => {
+                                        break_err!(client.send(r).await);
+                                    }
+                                    _ => break Err(ProtocolError::InvalidMessage { string, cause })
+                                }
+                                _ => break Err(e)
+                            }
+                        }                        
                     }
                 };
                 if result.is_err() {

@@ -56,7 +56,7 @@ impl Stream for ClientStream {
                 Poll::Ready(Ok(())) => {
                     // assure that we wake up again to check the incoming stream.
                     cx.waker().wake_by_ref();
-                    return Poll::Ready(None);
+                    //return Poll::Ready(None);
                 }
                 Poll::Ready(Err(e)) => {
                     cx.waker().wake_by_ref();
@@ -137,14 +137,14 @@ impl Future for Outgoing {
                 }
                 Poll::Pending => {
                     ready!(Pin::new(&mut this.sink).poll_flush(cx))?;
-                    return Poll::Pending;
+                    return Poll::Ready(Ok(()));
                 }
             }
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ClientState {
     registered: bool,
     nick: String,
@@ -158,11 +158,10 @@ pub struct Client {
     outgoing: Option<Outgoing>,
     sender: Sender,
     addr: SocketAddr,
-    server: Arc<ServerState>
 }
 
 impl Client {
-    pub async fn new(ss: Arc<ServerState>, sock: Socket<TcpStream>) -> error::Result<Client> {
+    pub async fn new(sock: Socket<TcpStream>) -> error::Result<Client> {
         let (tx_outgoing, rx_outgoing) = mpsc::unbounded_channel();
         let addr = match &sock {
             Socket::Plain(s) => s.peer_addr(),
@@ -186,7 +185,6 @@ impl Client {
             }),
             sender,
             addr,
-            server: ss
         })
     }
 
@@ -194,11 +192,7 @@ impl Client {
         self.sender.send(msg)
     }
 
-    pub async fn send<M: Into<Message>>(&mut self, msg: M) -> Result<(), ProtocolError> {
-        let mut msg: Message = msg.into();
-        msg.set_prefix(&self.server.get_name());
-        self.sender.send(msg)
-    }
+
 
     pub fn address(&self) -> SocketAddr {
         self.addr.clone()
@@ -214,7 +208,7 @@ impl Client {
 
     pub async fn poll_send(&mut self) -> Result<(), ProtocolError> {
         if let Some(outgoing) = self.outgoing.as_mut() {
-            outgoing.await?;
+            outgoing.await.expect("Failed to poll outgoing messages");
         }
         Ok(())
     }

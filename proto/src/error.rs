@@ -1,7 +1,7 @@
 use thiserror::Error;
 use tokio::sync::mpsc;
 
-use crate::message::Message;
+use crate::{message::Message, response::Response};
 
 pub type Result<T, E = ProtocolError> = ::std::result::Result<T, E>;
 
@@ -37,12 +37,20 @@ pub enum MessageParseError {
     InvalidArgumentCount,
     #[error("no line delimiter")]
     MissingCRLF,
+    #[error("command error response")]
+    ErrResponse(Response),
     #[error("error decoding line: {}", string)]
     LineError {
         string: String,
         #[source]
         cause: LineCodecError,
     },
+}
+
+impl From<Response> for MessageParseError {
+    fn from(value: Response) -> Self {
+        MessageParseError::ErrResponse(value)
+    }
 }
 
 #[derive(Debug, Error)]

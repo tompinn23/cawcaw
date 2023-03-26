@@ -1,12 +1,18 @@
 use std::string;
 
-use crate::{codecs::message, error::MessageParseError};
+use crate::{codecs::message, error::MessageParseError, response::Response};
 
 //use macros;
 
 //#[macros::stringlike]
+
 #[derive(Clone, PartialEq, Debug)]
 pub enum Command {
+    /* User registration */
+    PASS(String),
+    NICK(String, Option<i32>),
+    USER(String, String, String, String),
+
     /* Recipient, Message, cc's */
     PRIVMSG(String, String, Option<Vec<String>>),
     NOTICE(String, String),
@@ -17,6 +23,17 @@ pub enum Command {
 
 #[allow(non_snake_case)]
 impl Command {
+    pub fn Pass<S: Into<String>>(password: S) -> Command {
+        Command::PASS(password.into())
+    }
+    pub fn Nick<S: Into<String>>(nick: S, hops: Option<i32>) -> Command {
+        Command::NICK(nick.into(), hops.map(|n| n.into()))
+    }
+    
+    pub fn User<S: Into<String>>(user: S, host: S, server: S, real: S) -> Command {
+        Command::USER(user.into(), host.into(), server.into(), real.into())
+    }
+
     pub fn Privmsg<S: Into<String>>(nick: S, message: S, cc: Option<Vec<S>>) -> Command {
         Command::PRIVMSG(
             nick.into(),
@@ -41,23 +58,48 @@ impl Command {
 
 impl Command {
     pub fn new(command: &str, args: Vec<&str>) -> Result<Command, MessageParseError> {
-        match command.to_uppercase().as_str() {
-            "NOTICE" => {
-                if args.len() != 2 {
-                    Ok(Command::Notice(args[0].to_owned(), args[1].to_owned()))
+        let command = command.to_uppercase();
+        match command.as_str() {
+            /* Registration messages */
+            "PASS" => {
+                if args.len() == 1 {
+                    Ok(Command::Pass(args[0]))
+                } else {
+                    Err(Response::ErrNeedMoreParams(command).into())
+                }
+            }
+            "NICK" => {
+                if args.len() == 1 {
+                    Ok(Command::Nick(args[0], None))
+                } else if args.len() == 2 {
+                    Ok(Command::Nick(args[0], Some(args[1].parse::<i32>().map_err(|_| MessageParseError::InvalidArgumentCount)?)))
                 } else {
                     Err(MessageParseError::InvalidArgumentCount)
+                }
+            }
+            "USER" => {
+                if args.len() == 4 {
+                    Ok(Command::User(args[0], args[1], args[2], args[3]))
+                } else {
+                    Err(Response::ErrNeedMoreParams(command).into())
+                }
+            }
+            "NOTICE" => {
+                if args.len() == 2 {
+                    Ok(Command::Notice(args[0].to_owned(), args[1].to_owned()))
+                } else {
+                    Err(Response::ErrNeedMoreParams(command).into())
                 }
             }
             "PING" => match args.len() {
                 1 => Ok(Command::Ping(args[0].to_owned(), None)),
                 2 => Ok(Command::Ping(args[0].to_owned(), Some(args[1].to_owned()))),
-                _ => Err(MessageParseError::InvalidArgumentCount),
+                _ => Err(Response::ErrNeedMoreParams(command).into()),
             },
             "PONG" => match args.len() {
                 1 => Ok(Command::Pong(args[0].to_owned(), None)),
                 2 => Ok(Command::Pong(args[0].to_owned(), Some(args[1].to_owned()))),
-                _ => Err(MessageParseError::InvalidArgumentCount),
+                _ => Err(Response::ErrNeedMoreParams(command).into()),
             },
             "PRIVMSG" => match args.len() {
                 2 => {
@@ -76,9 +118,9 @@ impl Command {
                         ))
                     }
                 }
-                _ => Err(MessageParseError::InvalidArgumentCount),
+                _ => Err(Response::ErrNeedMoreParams(command).into()),
             },
-            _ => Err(MessageParseError::InvalidCommand),
+            _ => Err(Response::ErrNoSuchCommand(command).into()),
         }
     }
 }
@@ -118,6 +160,10 @@ fn stringify_owned(cmd: &str, args: &[String]) -> String {
 impl<'a> From<&'a Command> for String {
     fn from(cmd: &'a Command) -> String {
         match *cmd {
+            Command::PASS(ref password) => stringify("PASSWORD", &[&password]),
+            Command::NICK(ref nick, None) => stringify("NICK", &[nick]),
+            Command::NICK(ref nick, Some(ref hops)) => stringify("NICK", &[nick, &hops.to_string()]),
+            Command::USER(ref u, ref h, ref s, ref r) => stringify("USER", &[u,h,s,r]),
             Command::PRIVMSG(ref recip, ref message, Some(ref ccs)) => stringify(
                 "privmsg",
                 &[format!("{},{}", recip, ccs.join(",")).as_ref(), &message],

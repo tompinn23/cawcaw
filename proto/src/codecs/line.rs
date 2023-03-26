@@ -46,7 +46,7 @@ impl Decoder for LineCodec {
         }
         let read_to = cmp::min(self.max_length.saturating_add(1), src.len());
 
-        let len = match memchr(b'\n', &src[self.next_index..read_to]) {
+        let mut len = match memchr(b'\n', &src[self.next_index..read_to]) {
             Some(n) => n,
             None if src.len() > self.max_length => {
                 return Err(LineCodecError::MaxLineLengthExceeded);
@@ -58,10 +58,15 @@ impl Decoder for LineCodec {
         };
         let mut buf = src.split_to(len);
         src.advance(1);
-        match buf.last() {
-            Some(b'\r') => buf.truncate(len - 1),
-            None => return Ok(Some(String::new())),
-            _ => {}
+        loop {
+            match buf.last() {
+                Some(b'\r') => { 
+                    buf.truncate(len - 1);
+                    len = len - 1
+                }
+                None => return Ok(Some(String::new())),
+                _ => break
+            }
         }
         self.next_index = 0;
         match self
